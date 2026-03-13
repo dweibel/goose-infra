@@ -1,0 +1,65 @@
+version: '3.8'
+
+# This compose file works with both docker-compose and podman-compose
+# For Podman: Use 'podman-compose' command instead of 'docker-compose'
+# Podman provides rootless container execution for enhanced security
+
+services:
+  goose-web:
+    build:
+      context: .
+      dockerfile: container/Dockerfile
+    container_name: goose-web
+    networks:
+      - goose-network
+    volumes:
+      - workspace:/workspace
+      - goose-config:/root/.config/goose
+    environment:
+      - GOOSE_MODE=${GOOSE_MODE:-interactive}
+      - GOOSE_CONTEXT_STRATEGY=${GOOSE_CONTEXT_STRATEGY:-default}
+      - GOOSE_MAX_TURNS=${GOOSE_MAX_TURNS:-10}
+      - GOOSE_PROVIDER=${GOOSE_PROVIDER}
+      - GOOSE_API_KEY=${GOOSE_API_KEY}
+      - TTYD_PORT=${TTYD_PORT:-7681}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7681"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    networks:
+      - goose-network
+    volumes:
+      - cloudflared-config:/etc/cloudflared
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    restart: unless-stopped
+    command: tunnel run --token ${TUNNEL_TOKEN} --url http://goose-web:7681
+    depends_on:
+      - goose-web
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  goose-network:
+    driver: bridge
+    internal: true
+
+volumes:
+  workspace:
+    driver: local
+  goose-config:
+    driver: local
+  cloudflared-config:
+    driver: local

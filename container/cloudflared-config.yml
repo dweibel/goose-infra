@@ -1,0 +1,9 @@
+tunnel: ad22b3dc-1898-45dd-8bed-8f909f381b47
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: goose.dirkweibel.dev
+    service: http://goose-web:7681
+    originRequest:
+      noTLSVerify: true
+  - service: http_status:404

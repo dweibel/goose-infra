@@ -1,0 +1,16 @@
+{
+  "name": "cloudflare-goose-terminal",
+  "version": "1.0.0",
+  "description": "Secure Docker-based web terminal for Goose AI agent with Cloudflare Tunnel",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "fast-check": "^3.15.0",
+    "js-yaml": "^4.1.0",
+    "vitest": "^1.2.0"
+  }
+}

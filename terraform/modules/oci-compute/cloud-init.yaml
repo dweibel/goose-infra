@@ -1,0 +1,129 @@
+#cloud-config
+# Cloud-init configuration for ARM64 OCI instance
+# Configures workspace volume mounting and basic system setup
+
+packages:
+  - podman
+  - podman-compose
+  - jq
+  - git
+  - curl
+  - unzip
+
+write_files:
+  - path: /etc/systemd/system/format-workspace-volume.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Format and mount workspace volume
+      After=cloud-init.service
+      Before=multi-user.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/format-workspace-volume.sh
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/bin/format-workspace-volume.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      
+      # Find the attached volume device (skip boot disk sda)
+      DEVICE=$(lsblk -o NAME,SERIAL -n | grep -v "^sda" | awk '{print "/dev/"$1}' | head -n1)
+      
+      if [ -z "$DEVICE" ]; then
+        echo "No additional block device found"
+        exit 1
+      fi
+      
+      # Check if already formatted
+      if ! blkid "$DEVICE"; then
+        echo "Formatting $DEVICE as ext4..."
+        mkfs.ext4 -F "$DEVICE"
+      fi
+      
+      # Create mount point
+      mkdir -p ${workspace_mount_path}
+      
+      # Mount the volume
+      if ! mountpoint -q ${workspace_mount_path}; then
+        mount "$DEVICE" ${workspace_mount_path}
+        echo "$DEVICE ${workspace_mount_path} ext4 defaults,nofail 0 2" >> /etc/fstab
+      fi
+      
+      # Set ownership
+      chown -R opc:opc ${workspace_mount_path}
+      chmod 755 ${workspace_mount_path}
+
+  - path: /etc/sysctl.d/99-swap.conf
+    permissions: '0644'
+    content: |
+      vm.swappiness=1
+
+  - path: /etc/yum.repos.d/oracle-linux-ol8-aarch64.repo
+    permissions: '0644'
+    content: |
+      # ARM64-specific repository configuration for Oracle Linux 8
+      [ol8_baseos_latest_aarch64]
+      name=Oracle Linux 8 BaseOS Latest (aarch64)
+      baseurl=https://yum.oracle.com/repo/OracleLinux/OL8/baseos/latest/aarch64/
+      gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle
+      gpgcheck=1
+      enabled=1
+
+runcmd:
+  # Install AWS CLI v2 for ARM64
+  - curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "/tmp/awscliv2.zip"
+  - unzip -q /tmp/awscliv2.zip -d /tmp
+  - /tmp/aws/install
+  - rm -rf /tmp/aws /tmp/awscliv2.zip
+
+  # Configure swap (4 GB)
+  - dd if=/dev/zero of=/swapfile bs=1M count=4096
+  - chmod 600 /swapfile
+  - mkswap /swapfile
+  - swapon /swapfile
+  - echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+  # Configure Podman log rotation
+  - mkdir -p /etc/containers
+  - |
+    cat > /etc/containers/containers.conf <<EOF
+    [engine]
+    events_logger = "journald"
+    log_driver = "journald"
+    EOF
+
+  # Enable and start format-workspace-volume service
+  - systemctl daemon-reload
+  - systemctl enable format-workspace-volume.service
+  - systemctl start format-workspace-volume.service
+
+  # Configure journald for structured logging
+  - |
+    cat >> /etc/systemd/journald.conf <<EOF
+    
+    # Logging configuration
+    MaxRetentionSec=7day
+    MaxFileSec=1day
+    EOF
+  - systemctl restart systemd-journald
+
+  # Enable lingering for opc user (allows user services to run without login)
+  - loginctl enable-linger opc
+
+  # Verify ARM64 architecture
+  - |
+    ARCH=$(uname -m)
+    if [ "$ARCH" != "aarch64" ]; then
+      echo "ERROR: Expected ARM64 (aarch64) architecture but found $ARCH" >&2
+      exit 1
+    fi
+    echo "Verified ARM64 architecture: $ARCH"
+
+final_message: "ARM64 OCI instance initialization complete. Workspace volume mounted at ${workspace_mount_path}."

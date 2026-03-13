@@ -1,0 +1,33 @@
+# Environment variables
+.env
+
+#Kiro
+.kiro
+
+# Volume data
+volumes/
+
+# Docker
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+coverage/
+*.test.log
+
+# Terraform
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Private keys and sensitive files
+*.pem
+*.key
