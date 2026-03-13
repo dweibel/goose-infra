@@ -4,6 +4,46 @@ This directory contains scripts for managing and testing the Goose container inf
 
 ## Management Scripts
 
+### oci-instance-retry.sh
+Automated retry script for OCI instance provisioning across availability domains. Handles capacity-constrained environments by cycling through all ADs with configurable retry intervals.
+
+```bash
+# Use defaults from .env
+./scripts/oci-instance-retry.sh
+
+# Specify custom compartment and retry limit
+./scripts/oci-instance-retry.sh --compartment-id ocid1.compartment.oc1... --max-retries 10
+
+# Use custom wait interval
+./scripts/oci-instance-retry.sh --wait-interval 120
+```
+
+**Options:**
+- `--compartment-id ID`: OCI compartment OCID (default: from .env)
+- `--shape SHAPE`: Compute shape (default: VM.Standard.A1.Flex)
+- `--max-retries N`: Maximum retry attempts (default: unlimited)
+- `--wait-interval SEC`: Wait time between retry rounds in seconds (default: 60)
+- `--help`: Display help message
+
+**What it does:**
+- Discovers all availability domains in the configured region
+- Attempts instance provisioning across all ADs in sequence
+- Logs all provisioning attempts with timestamps
+- Updates terraform state on successful provisioning
+- Handles SIGINT/SIGTERM for graceful termination
+- Validates ARM64 architecture requirements
+
+**Requirements:**
+- OCI CLI installed and configured
+- jq installed for JSON parsing
+- .env file with OCI credentials
+- Terraform initialized in terraform/ directory
+
+**Use when:**
+- OCI Always Free tier capacity is limited
+- Need automated retry logic for instance provisioning
+- Deploying to capacity-constrained regions
+
 ### start.sh
 Starts the Goose container stack using podman-compose.
 
