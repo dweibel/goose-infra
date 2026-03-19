@@ -35,6 +35,9 @@ EXPOSE 7681
 # Configure shell environment
 ENV SHELL=/bin/bash
 
+# Bypass keyring/DBUS in headless container to prevent segfaults
+ENV GOOSE_KEYRING_BACKEND=plaintext
+
 # Create entrypoint script
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
