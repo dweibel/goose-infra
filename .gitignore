@@ -4,7 +4,7 @@
 !.env.example
 
 #Kiro
-.kiro
+.kiro/
 
 # Volume data
 volumes/
@@ -15,6 +15,9 @@ volumes/
 # IDE
 .vscode/
 .idea/
+
+# Node modules
+node_modules/
 
 # OS
 .DS_Store

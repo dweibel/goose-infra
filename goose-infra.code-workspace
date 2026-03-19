@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../agent-infra"
+		},
+		{
+			"path": "../oci-infra"
+		},
+		{
+			"path": "../wikijs-infra"
+		}
+	],
+	"settings": {}
+}

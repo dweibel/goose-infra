@@ -1,0 +1,31 @@
+# Cloudflare Tunnel configuration for Wiki MCP Server
+# This is a template — replace <tunnel-id> and hostname with your values.
+# The existing cloudflared-config.yml handles the Goose terminal tunnel.
+
+tunnel: <tunnel-id>
+credentials-file: /root/.cloudflared/<tunnel-id>.json
+
+ingress:
+  # HTTP MCP endpoint
+  - hostname: mcp.yourdomain.com
+    path: /mcp
+    service: http://localhost:3000
+    originRequest:
+      noTLSVerify: true
+
+  # Health check endpoint
+  - hostname: mcp.yourdomain.com
+    path: /health
+    service: http://localhost:3000
+    originRequest:
+      noTLSVerify: true
+
+  # WebSocket endpoint
+  - hostname: mcp.yourdomain.com
+    path: /ws
+    service: ws://localhost:3001
+    originRequest:
+      noTLSVerify: true
+
+  # Catch-all
+  - service: http_status:404
