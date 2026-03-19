@@ -1,4 +1,4 @@
-const { randomUUID } = require('crypto');
+const { GatewayError } = require('./gateway-client');
 
 // JSON-RPC 2.0 error codes
 const ERROR_CODES = {
@@ -10,48 +10,123 @@ const ERROR_CODES = {
 };
 
 const PROTOCOL_VERSION = '2024-11-05';
-const SERVER_INFO = { name: 'wiki-mcp-server', version: '1.0.0' };
+const SERVER_INFO = { name: 'wiki-mcp-server', version: '2.0.0' };
 
 class MCPCore {
-  constructor(dbClient, wikiBaseUrl, wikiAdminToken, enableWriteOps = false) {
-    this.dbClient = dbClient;
-    this.wikiBaseUrl = wikiBaseUrl;
-    this.wikiAdminToken = wikiAdminToken;
+  /**
+   * @param {import('./gateway-client').GatewayClient} gatewayClient
+   * @param {boolean} [enableWriteOps=false]
+   */
+  constructor(gatewayClient, enableWriteOps = false) {
+    this.gatewayClient = gatewayClient;
     this.enableWriteOps = enableWriteOps;
     this.tools = new Map();
     this.startTime = Date.now();
   }
 
   async initialize() {
+    // Read tools (always registered)
     this._registerTool('search_wiki', {
-      description: 'Search wiki pages using semantic similarity via pgvector embeddings',
+      description: 'Search wiki pages using semantic similarity. Returns ranked results with relevance scores.',
       inputSchema: {
         type: 'object',
         properties: {
           query: { type: 'string', description: 'Search query text' },
-          top_k: { type: 'number', description: 'Number of results to return (default: 5)', default: 5 },
+          top_k: { type: 'number', description: 'Number of results (1-20, default: 5)' },
         },
         required: ['query'],
       },
-      handler: async (params) => this._searchWiki(params),
+      handler: (params) => this._searchWiki(params),
     });
 
     this._registerTool('get_wiki_page', {
-      description: 'Get the full content of a wiki page by its ID',
+      description: 'Get the full content of a wiki page by its numeric ID or path.',
       inputSchema: {
         type: 'object',
         properties: {
           page_id: { type: 'number', description: 'The wiki page ID' },
+          path: { type: 'string', description: 'The wiki page path (e.g. "home" or "devops/kubernetes")' },
         },
-        required: ['page_id'],
       },
-      handler: async (params) => this._getWikiPage(params),
+      handler: (params) => this._getWikiPage(params),
     });
+
+    this._registerTool('list_wiki_pages', {
+      description: 'List all wiki pages, ordered by most recently updated.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+      handler: () => this._listWikiPages(),
+    });
+
+    // Write tools (gated)
+    if (this.enableWriteOps) {
+      this._registerTool('create_wiki_page', {
+        description: 'Create a new wiki page with the given title, path, and content.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Page title' },
+            path: { type: 'string', description: 'Page path (e.g. "devops/new-page")' },
+            content: { type: 'string', description: 'Page content in markdown' },
+            description: { type: 'string', description: 'Short page description' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Page tags' },
+          },
+          required: ['title', 'path', 'content'],
+        },
+        handler: (params) => this._createWikiPage(params),
+      });
+
+      this._registerTool('update_wiki_page', {
+        description: 'Update an existing wiki page. Only provided fields are changed.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            page_id: { type: 'number', description: 'The wiki page ID to update' },
+            title: { type: 'string', description: 'New page title' },
+            content: { type: 'string', description: 'New page content in markdown' },
+            description: { type: 'string', description: 'New page description' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'New page tags' },
+          },
+          required: ['page_id'],
+        },
+        handler: (params) => this._updateWikiPage(params),
+      });
+
+      this._registerTool('delete_wiki_page', {
+        description: 'Delete a wiki page by its ID.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            page_id: { type: 'number', description: 'The wiki page ID to delete' },
+          },
+          required: ['page_id'],
+        },
+        handler: (params) => this._deleteWikiPage(params),
+      });
+
+      this._registerTool('move_wiki_page', {
+        description: 'Move a wiki page to a new path.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            page_id: { type: 'number', description: 'The wiki page ID to move' },
+            destination_path: { type: 'string', description: 'New path for the page' },
+            destination_locale: { type: 'string', description: 'Destination locale (default: "en")' },
+          },
+          required: ['page_id', 'destination_path'],
+        },
+        handler: (params) => this._moveWikiPage(params),
+      });
+    }
   }
 
   _registerTool(name, definition) {
     this.tools.set(name, definition);
   }
+
+  // ── MCP protocol handling ─────────────────────────────────────────────
 
   async handleRequest(method, params) {
     switch (method) {
@@ -66,7 +141,7 @@ class MCPCore {
     }
   }
 
-  _handleInitialize(params) {
+  _handleInitialize() {
     return {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: { tools: {} },
@@ -77,11 +152,7 @@ class MCPCore {
   _handleToolsList() {
     const tools = [];
     for (const [name, def] of this.tools) {
-      tools.push({
-        name,
-        description: def.description,
-        inputSchema: def.inputSchema,
-      });
+      tools.push({ name, description: def.description, inputSchema: def.inputSchema });
     }
     return { tools };
   }
@@ -104,10 +175,15 @@ class MCPCore {
     }
     try {
       const result = await tool.handler(args);
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result) }],
-      };
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (err) {
+      if (err instanceof GatewayError) {
+        throw {
+          code: this._mapGatewayErrorCode(err.statusCode),
+          message: err.message,
+          data: { tool: toolName, statusCode: err.statusCode },
+        };
+      }
       throw {
         code: ERROR_CODES.INTERNAL_ERROR,
         message: `Tool execution failed: ${err.message}`,
@@ -130,10 +206,10 @@ class MCPCore {
 
   async checkHealth() {
     try {
-      await this.dbClient.query('SELECT 1');
-      return { database: 'connected' };
+      await this.gatewayClient.checkHealth();
+      return { gateway: 'connected' };
     } catch (err) {
-      return { database: 'disconnected', error: err.message };
+      return { gateway: 'disconnected', error: err.message };
     }
   }
 
@@ -141,43 +217,66 @@ class MCPCore {
     return Date.now() - this.startTime;
   }
 
-  async _searchWiki(params) {
-    const { query, top_k = 5 } = params;
-    if (!query) {
-      throw new Error('query parameter is required');
+  // ── Gateway error → MCP error code mapping ───────────────────────────
+
+  _mapGatewayErrorCode(statusCode) {
+    if (statusCode >= 400 && statusCode < 500) {
+      // 400, 404, 409 → invalid params
+      if (statusCode === 401) return ERROR_CODES.INTERNAL_ERROR; // misconfigured key
+      return ERROR_CODES.INVALID_PARAMS;
     }
-    const result = await this.dbClient.query(
-      `SELECT p.id AS page_id, p.title AS page_title, p.path AS page_path,
-              pe.content AS chunk_text,
-              1 - (pe.embedding <=> (
-                SELECT embedding FROM page_embeddings
-                WHERE content = $1 LIMIT 1
-              )) AS relevance_score
-       FROM page_embeddings pe
-       JOIN pages p ON pe."pageId" = p.id
-       ORDER BY pe.embedding <=> (
-         SELECT embedding FROM page_embeddings
-         WHERE content = $1 LIMIT 1
-       )
-       LIMIT $2`,
-      [query, top_k]
-    );
-    return result.rows;
+    return ERROR_CODES.INTERNAL_ERROR; // 5xx, network errors
   }
 
-  async _getWikiPage(params) {
-    const { page_id } = params;
-    if (page_id === undefined || page_id === null) {
-      throw new Error('page_id parameter is required');
+  // ── Tool handlers ─────────────────────────────────────────────────────
+
+  async _searchWiki({ query, top_k }) {
+    if (!query || (typeof query === 'string' && query.trim() === '')) {
+      throw { code: ERROR_CODES.INVALID_PARAMS, message: 'query parameter is required' };
     }
-    const result = await this.dbClient.query(
-      'SELECT id, title, path, content, "updatedAt" FROM pages WHERE id = $1',
-      [page_id]
-    );
-    if (result.rows.length === 0) {
-      throw new Error(`Page not found: ${page_id}`);
+    return this.gatewayClient.search(query, top_k);
+  }
+
+  async _getWikiPage({ page_id, path }) {
+    if (page_id == null && path == null) {
+      throw { code: ERROR_CODES.INVALID_PARAMS, message: 'Either page_id or path must be provided' };
     }
-    return result.rows[0];
+    if (page_id != null) {
+      return this.gatewayClient.getPage(page_id);
+    }
+    return this.gatewayClient.getPageByPath(path);
+  }
+
+  async _listWikiPages() {
+    return this.gatewayClient.listPages();
+  }
+
+  async _createWikiPage({ title, path, content, description, tags }) {
+    if (!title || !path || !content) {
+      throw { code: ERROR_CODES.INVALID_PARAMS, message: 'title, path, and content are required' };
+    }
+    return this.gatewayClient.createPage({ title, path, content, description, tags });
+  }
+
+  async _updateWikiPage({ page_id, ...updates }) {
+    if (page_id == null) {
+      throw { code: ERROR_CODES.INVALID_PARAMS, message: 'page_id is required' };
+    }
+    return this.gatewayClient.updatePage(page_id, updates);
+  }
+
+  async _deleteWikiPage({ page_id }) {
+    if (page_id == null) {
+      throw { code: ERROR_CODES.INVALID_PARAMS, message: 'page_id is required' };
+    }
+    return this.gatewayClient.deletePage(page_id);
+  }
+
+  async _moveWikiPage({ page_id, destination_path, destination_locale }) {
+    if (page_id == null || !destination_path) {
+      throw { code: ERROR_CODES.INVALID_PARAMS, message: 'page_id and destination_path are required' };
+    }
+    return this.gatewayClient.movePage(page_id, destination_path, destination_locale);
   }
 }
 

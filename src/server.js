@@ -1,88 +1,113 @@
+/**
+ * Wiki MCP Server — stdio-only entry point.
+ *
+ * Goose invokes this as a child process. Communication is via
+ * stdin/stdout JSON-RPC 2.0 (MCP protocol).
+ *
+ * No network ports are opened.
+ */
+
 const { loadConfig } = require('./config');
+const { GatewayClient } = require('./core/gateway-client');
 const { MCPCore } = require('./core/mcp-core');
-const { HttpTransport } = require('./transports/http-transport');
-const { WebSocketTransport } = require('./transports/websocket-transport');
+const readline = require('readline');
 
-async function createDbClient(config) {
-  // Use pg module if available, otherwise create a mock for testing
+async function main() {
+  // Load config
+  let config;
   try {
-    const { Pool } = require('pg');
-    const pool = new Pool({
-      host: config.db.host,
-      port: config.db.port,
-      database: config.db.database,
-      user: config.db.user,
-      password: config.db.password,
-    });
-    return pool;
+    config = loadConfig();
   } catch (err) {
-    console.error('[SERVER] Failed to create database client:', err.message);
-    throw err;
+    console.error(`[MCP] Configuration error: ${err.message}`);
+    process.exit(1);
   }
-}
 
-async function startServer(configOverride) {
-  const config = configOverride || loadConfig();
-  const transports = [];
-
-  console.log('[SERVER] Starting MCP server...');
-  console.log(`[SERVER] Stdio transport: enabled (default)`);
-  console.log(`[SERVER] HTTP transport: ${config.http.enabled ? 'enabled' : 'disabled'}`);
-  console.log(`[SERVER] WebSocket transport: ${config.websocket.enabled ? 'enabled' : 'disabled'}`);
-
-  // Initialize shared database client
-  const dbClient = await createDbClient(config);
+  // Create gateway client
+  const gatewayClient = new GatewayClient({
+    baseUrl: config.gateway.url,
+    apiKey: config.gateway.apiKey,
+  });
 
   // Initialize MCPCore
-  const mcpCore = new MCPCore(
-    dbClient,
-    config.wiki.baseUrl,
-    config.wiki.adminToken,
-    config.wiki.enableWriteOps
-  );
+  const mcpCore = new MCPCore(gatewayClient, config.wiki.enableWriteOps);
   await mcpCore.initialize();
 
-  // Start HTTP transport if enabled
-  let httpTransport = null;
-  if (config.http.enabled) {
-    httpTransport = new HttpTransport(mcpCore, config);
-    await httpTransport.start();
-    transports.push(httpTransport);
-  }
+  const toolCount = mcpCore.getToolList().tools.length;
+  console.error(`[MCP] Wiki MCP server started (stdio). ${toolCount} tools registered.`);
+  console.error(`[MCP] Gateway: ${config.gateway.url}`);
+  console.error(`[MCP] Write ops: ${config.wiki.enableWriteOps ? 'enabled' : 'disabled'}`);
 
-  // Start WebSocket transport if enabled
-  let wsTransport = null;
-  if (config.websocket.enabled) {
-    wsTransport = new WebSocketTransport(mcpCore, config);
-    await wsTransport.start();
-    transports.push(wsTransport);
-  }
-
-  console.log('[SERVER] MCP server started successfully');
-
-  // Graceful shutdown
-  const shutdown = async () => {
-    console.log('[SERVER] Shutting down...');
-    for (const transport of transports) {
-      await transport.stop();
+  // Check gateway health at startup (warn only, don't exit)
+  try {
+    const health = await mcpCore.checkHealth();
+    if (health.gateway === 'connected') {
+      console.error('[MCP] Gateway health: connected');
+    } else {
+      console.error(`[MCP] Gateway health: disconnected — ${health.error}`);
     }
-    if (dbClient.end) await dbClient.end();
-    console.log('[SERVER] Shutdown complete');
-    process.exit(0);
-  };
+  } catch (err) {
+    console.error(`[MCP] Gateway health check failed: ${err.message}`);
+  }
 
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  // Stdio JSON-RPC transport
+  const rl = readline.createInterface({ input: process.stdin, terminal: false });
+  let pendingRequests = 0;
+  let stdinClosed = false;
 
-  return { mcpCore, httpTransport, wsTransport, dbClient, config, shutdown };
-}
+  function maybeExit() {
+    if (stdinClosed && pendingRequests === 0) {
+      console.error('[MCP] All requests drained, shutting down.');
+      process.exit(0);
+    }
+  }
 
-// Run if executed directly
-if (require.main === module) {
-  startServer().catch((err) => {
-    console.error('[SERVER] Fatal error:', err.message);
-    process.exit(1);
+  rl.on('line', async (line) => {
+    pendingRequests++;
+    let request;
+    try {
+      request = JSON.parse(line);
+    } catch {
+      const errResponse = {
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32700, message: 'Parse error' },
+      };
+      process.stdout.write(JSON.stringify(errResponse) + '\n');
+      pendingRequests--;
+      maybeExit();
+      return;
+    }
+
+    const { id, method, params } = request;
+
+    try {
+      const result = await mcpCore.handleRequest(method, params);
+      const response = { jsonrpc: '2.0', id, result };
+      process.stdout.write(JSON.stringify(response) + '\n');
+    } catch (err) {
+      const response = {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: err.code || -32603,
+          message: err.message || 'Internal error',
+          ...(err.data ? { data: err.data } : {}),
+        },
+      };
+      process.stdout.write(JSON.stringify(response) + '\n');
+    }
+    pendingRequests--;
+    maybeExit();
+  });
+
+  rl.on('close', () => {
+    console.error('[MCP] stdin closed, waiting for pending requests...');
+    stdinClosed = true;
+    maybeExit();
   });
 }
 
-module.exports = { startServer, createDbClient };
+main().catch((err) => {
+  console.error(`[MCP] Fatal error: ${err.message}`);
+  process.exit(1);
+});

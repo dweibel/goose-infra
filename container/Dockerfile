@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM --platform=linux/arm64 ubuntu:22.04
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,6 +15,11 @@ RUN apt-get update && apt-get install -y \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Node.js 20 for MCP server
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install ttyd web terminal emulator (ARM64)
 RUN wget https://github.com/tsl0922/ttyd/releases/download/1.7.4/ttyd.aarch64 -O /usr/local/bin/ttyd \
     && chmod +x /usr/local/bin/ttyd
@@ -28,6 +33,10 @@ RUN mkdir -p /root/.local/bin && \
 
 # Set working directory
 WORKDIR /workspace
+
+# Copy Wiki MCP server source
+COPY src/ /app/src/
+COPY container/goose-mcp-config.json /app/goose-mcp-config.json
 
 # Expose internal port for ttyd
 EXPOSE 7681

@@ -35,6 +35,9 @@ podman run -d --name goose-web \
   -e GOOSE_LEAD_TURNS=${GOOSE_LEAD_TURNS} \
   -e GOOSE_LEAD_FAILURE_THRESHOLD=${GOOSE_LEAD_FAILURE_THRESHOLD} \
   -e GOOSE_LEAD_FALLBACK_TURNS=${GOOSE_LEAD_FALLBACK_TURNS} \
+  -e WIKI_GATEWAY_URL=${WIKI_GATEWAY_URL:-http://host.containers.internal:3001} \
+  -e WIKI_GATEWAY_API_KEY=${WIKI_GATEWAY_API_KEY} \
+  -e ENABLE_WRITE_OPS=${ENABLE_WRITE_OPS:-true} \
   -p 7681:7681 \
   --restart unless-stopped \
   goose-web

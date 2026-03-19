@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "wiki": {
+      "command": "node",
+      "args": ["/app/src/server.js"],
+      "env": {
+        "WIKI_GATEWAY_URL": "http://host.containers.internal:3001",
+        "WIKI_GATEWAY_API_KEY": "${WIKI_GATEWAY_API_KEY}",
+        "ENABLE_WRITE_OPS": "true",
+        "LOG_LEVEL": "info"
+      }
+    }
+  }
+}
