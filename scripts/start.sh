@@ -1,61 +1,46 @@
 #!/bin/bash
+# Create network if it doesn't exist
+podman network exists goose-network || podman network create goose-network
 
-# Start script for Cloudflare Goose Terminal
-# Validates configuration and starts the Podman Compose stack
-
-set -e
-
-echo "Starting Cloudflare Goose Terminal..."
-
-# Check for .env file
-if [ ! -f .env ]; then
-    echo "ERROR: .env file not found!"
-    echo "Please copy .env.example to .env and configure your settings."
-    exit 1
+# Load environment from .env file
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+ENV_FILE="${SCRIPT_DIR}/../.env"
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+    echo "Loaded environment from $ENV_FILE"
+elif [ -f "${SCRIPT_DIR}/.env" ]; then
+    set -a
+    source "${SCRIPT_DIR}/.env"
+    set +a
+    echo "Loaded environment from ${SCRIPT_DIR}/.env"
+else
+    echo "WARNING: .env file not found at $ENV_FILE or ${SCRIPT_DIR}/.env"
 fi
 
-# Validate required environment variables
-source .env
+# Start the container
+podman run -d --name goose-web \
+  --network goose-network \
+  -v workspace:/workspace \
+  -v goose-config:/root/.config/goose \
+  -e GOOSE_MODE=${GOOSE_MODE:-interactive} \
+  -e GOOSE_KEYRING_BACKEND=plaintext \
+  -e GOOSE_DISABLE_KEYRING=1 \
+  -e GOOSE_PROVIDER=${GOOSE_PROVIDER} \
+  -e OPENROUTER_API_KEY=${OPENROUTER_API_KEY} \
+  -e GOOSE_MODEL=${GOOSE_MODEL} \
+  -e GOOSE_LEAD_MODEL=${GOOSE_LEAD_MODEL} \
+  -e GOOSE_LEAD_PROVIDER=${GOOSE_LEAD_PROVIDER} \
+  -e GOOSE_LEAD_TURNS=${GOOSE_LEAD_TURNS} \
+  -e GOOSE_LEAD_FAILURE_THRESHOLD=${GOOSE_LEAD_FAILURE_THRESHOLD} \
+  -e GOOSE_LEAD_FALLBACK_TURNS=${GOOSE_LEAD_FALLBACK_TURNS} \
+  -e WIKI_GATEWAY_URL=${WIKI_GATEWAY_URL:-http://host.containers.internal:3001} \
+  -e WIKI_GATEWAY_API_KEY=${WIKI_GATEWAY_API_KEY} \
+  -e ENABLE_WRITE_OPS=${ENABLE_WRITE_OPS:-true} \
+  -p 7681:7681 \
+  --restart unless-stopped \
+  goose-web
 
-REQUIRED_VARS=("TUNNEL_TOKEN" "GOOSE_PROVIDER" "GOOSE_API_KEY")
-MISSING_VARS=()
-
-for var in "${REQUIRED_VARS[@]}"; do
-    if [ -z "${!var}" ] || [ "${!var}" = "your_tunnel_token_here" ] || [ "${!var}" = "your_api_key_here" ]; then
-        MISSING_VARS+=("$var")
-    fi
-done
-
-if [ ${#MISSING_VARS[@]} -gt 0 ]; then
-    echo "ERROR: The following required environment variables are missing or not configured:"
-    for var in "${MISSING_VARS[@]}"; do
-        echo "  - $var"
-    done
-    echo ""
-    echo "Please update your .env file with valid values."
-    exit 1
-fi
-
-# Start Podman Compose stack
-echo "Configuration validated. Starting containers..."
-podman-compose up -d
-
-# Wait for containers to start
-echo "Waiting for containers to become healthy..."
-sleep 5
-
-# Display status
-echo ""
-echo "Container Status:"
-podman-compose ps
-
-echo ""
-echo "Health Check Results:"
-podman inspect --format='{{.Name}}: {{.State.Health.Status}}' goose-web cloudflared 2>/dev/null || echo "Health checks initializing..."
-
-echo ""
-echo "Cloudflare Goose Terminal started successfully!"
-echo "Access your terminal at: https://${TUNNEL_SUBDOMAIN:-your-subdomain.example.com}"
-echo ""
-echo "To view logs, run: ./scripts/logs.sh"
-echo "To stop the stack, run: ./scripts/stop.sh"
+sleep 2
+podman ps | grep goose-web

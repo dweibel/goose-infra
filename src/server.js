@@ -80,6 +80,14 @@ async function main() {
 
     const { id, method, params } = request;
 
+    // JSON-RPC notifications have no id — don't send a response
+    if (id === undefined || id === null) {
+      console.error(`[MCP] Notification received: ${method}`);
+      pendingRequests--;
+      maybeExit();
+      return;
+    }
+
     try {
       const result = await mcpCore.handleRequest(method, params);
       const response = { jsonrpc: '2.0', id, result };
