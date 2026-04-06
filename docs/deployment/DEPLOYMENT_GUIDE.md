@@ -367,14 +367,37 @@ podman system reset --force
 
 ### Update Configuration
 
+There are two deployment paths depending on what changed:
+
+#### Env-only changes (model, API keys, feature flags)
+
+No rebuild needed. The entrypoint regenerates `config.yaml` from environment variables on every container start.
+
 ```bash
-# Edit .env file
+# 1. Edit .env with your changes
 nano .env
 
-# Restart to apply changes
-./scripts/stop.sh
-./scripts/start.sh
+# 2. Restart the container (syncs .env to remote and restarts)
+./scripts/restart.sh
 ```
+
+This takes about 5 seconds.
+
+#### Image changes (Dockerfile, entrypoint, recipes, wiki-cli version)
+
+A full rebuild is required when you change anything baked into the container image.
+
+```bash
+# 1. Make your changes to container/, recipes, etc.
+
+# 2. Build the new image on the OCI instance
+./scripts/build.sh
+
+# 3. Stop the old container and start the new one
+./scripts/restart.sh
+```
+
+The build takes several minutes since it runs natively on the ARM64 instance.
 
 ### Backup Data
 

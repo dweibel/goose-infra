@@ -41,7 +41,7 @@ RUN curl -fsSL "https://github.com/dweibel/wikijs-infra/releases/download/wiki-c
 WORKDIR /workspace
 
 # Copy wiki-assistant recipe (teaches Goose about wiki-cli)
-COPY recipes/ /app/recipes/
+COPY container/recipes/ /app/recipes/
 
 # Expose internal port for ttyd
 EXPOSE 7681
@@ -53,7 +53,7 @@ ENV SHELL=/bin/bash
 ENV GOOSE_KEYRING_BACKEND=plaintext
 
 # Create entrypoint script
-COPY entrypoint.sh /entrypoint.sh
+COPY container/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Set entrypoint
