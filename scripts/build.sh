@@ -32,13 +32,29 @@ echo "✓ Remote directory created"
 echo ""
 
 echo "Step 2: Transferring files to OCI instance..."
-# Transfer necessary files
+
+# Resolve script location so paths work regardless of cwd
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Transfer Dockerfile (renamed to match build command)
 scp -i "${SSH_KEY}" \
-    Dockerfile.goose-web \
-    entrypoint.sh \
-    docker-compose.yml \
-    .env \
-    "${OCI_USER}@${OCI_IP}:${REMOTE_DIR}/" > /tmp/scp-out.txt 2>&1
+    "${PROJECT_ROOT}/container/Dockerfile" \
+    "${OCI_USER}@${OCI_IP}:${REMOTE_DIR}/Dockerfile.goose-web" > /tmp/scp-out.txt 2>&1
+
+# Transfer entrypoint, compose, and env
+scp -i "${SSH_KEY}" \
+    "${PROJECT_ROOT}/container/entrypoint.sh" \
+    "${PROJECT_ROOT}/docker-compose.yml" \
+    "${PROJECT_ROOT}/.env" \
+    "${OCI_USER}@${OCI_IP}:${REMOTE_DIR}/" >> /tmp/scp-out.txt 2>&1
+
+# Transfer recipes directory
+ssh -i "${SSH_KEY}" "${OCI_USER}@${OCI_IP}" "mkdir -p ${REMOTE_DIR}/recipes" > /dev/null 2>&1
+scp -i "${SSH_KEY}" -r \
+    "${PROJECT_ROOT}/container/recipes/" \
+    "${OCI_USER}@${OCI_IP}:${REMOTE_DIR}/recipes/" >> /tmp/scp-out.txt 2>&1
+
 cat /tmp/scp-out.txt
 
 echo "✓ Files transferred"

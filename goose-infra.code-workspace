@@ -4,9 +4,6 @@
 			"path": "."
 		},
 		{
-			"path": "../agent-infra"
-		},
-		{
 			"path": "../oci-infra"
 		},
 		{

@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20 for MCP server
+# Install Node.js 20 (still needed for other tooling)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
@@ -31,12 +31,17 @@ RUN mkdir -p /root/.local/bin && \
     chmod +x /usr/local/bin/goose && \
     rm /tmp/goose.tar.bz2
 
+# Install wiki-cli from GitHub release (linux/arm64)
+ARG WIKI_CLI_VERSION=v0.1.0
+RUN curl -fsSL "https://github.com/dweibel/wikijs-infra/releases/download/wiki-cli/${WIKI_CLI_VERSION}/wiki-cli-linux-arm64" \
+    -o /usr/local/bin/wiki-cli && \
+    chmod +x /usr/local/bin/wiki-cli
+
 # Set working directory
 WORKDIR /workspace
 
-# Copy Wiki MCP server source
-COPY src/ /app/src/
-COPY container/goose-mcp-config.json /app/goose-mcp-config.json
+# Copy wiki-assistant recipe (teaches Goose about wiki-cli)
+COPY recipes/ /app/recipes/
 
 # Expose internal port for ttyd
 EXPOSE 7681
