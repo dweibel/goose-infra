@@ -10,6 +10,29 @@ TTYD_PORT=${TTYD_PORT:-7681}
 GOOSE_MODE=${GOOSE_MODE:-interactive}
 
 # ---------------------------------------------------------------------------
+# Load secrets from /run/secrets (podman secrets)
+# ---------------------------------------------------------------------------
+# Podman mounts secrets as files. Write them to a profile snippet so every
+# bash session (including ttyd) picks them up.
+# ---------------------------------------------------------------------------
+SECRETS_PROFILE="/etc/profile.d/goose-secrets.sh"
+: > "${SECRETS_PROFILE}"
+
+for secret in goose-openrouter-key goose-wiki-gateway-key goose-tunnel-token; do
+    if [ -f "/run/secrets/${secret}" ]; then
+        value="$(cat /run/secrets/${secret} | tr -d '\r\n')"
+        case "${secret}" in
+            goose-openrouter-key)    echo "export OPENROUTER_API_KEY='${value}'" >> "${SECRETS_PROFILE}" ;;
+            goose-wiki-gateway-key)  echo "export WIKI_GATEWAY_API_KEY='${value}'" >> "${SECRETS_PROFILE}" ;;
+            goose-tunnel-token)      echo "export TUNNEL_TOKEN='${value}'" >> "${SECRETS_PROFILE}" ;;
+        esac
+    fi
+done
+
+# Also export for the current process (used by config.yaml generation below)
+source "${SECRETS_PROFILE}" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
 # Generate Goose config.yaml
 # ---------------------------------------------------------------------------
 # We deliberately omit the old wiki stdio extension (which caused segfaults).
@@ -39,10 +62,10 @@ echo "Starting Goose Terminal in ${GOOSE_MODE} mode..."
 if [ "$GOOSE_MODE" = "auto" ]; then
     # Headless mode — load the wiki-assistant recipe so Goose knows about wiki-cli
     echo "Headless mode activated"
-    exec ttyd -p ${TTYD_PORT} -W bash -c "goose session start --mode auto --recipe /app/recipes/wiki-assistant.yaml"
+    exec ttyd -p ${TTYD_PORT} -W bash -lc "goose session start --mode auto --recipe /app/recipes/wiki-assistant.yaml"
 else
-    # Interactive mode — standard terminal
+    # Interactive mode — standard terminal (login shell sources /etc/profile.d/)
     echo "Interactive mode activated"
     echo "Tip: start a wiki-aware session with: goose session start --recipe /app/recipes/wiki-assistant.yaml"
-    exec ttyd -p ${TTYD_PORT} -W bash
+    exec ttyd -p ${TTYD_PORT} -W bash -l
 fi

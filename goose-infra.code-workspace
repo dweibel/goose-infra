@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../wikijs-infra"
+		},
+		{
+			"path": "../gocoder"
 		}
 	],
 	"settings": {}

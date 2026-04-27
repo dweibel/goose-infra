@@ -41,6 +41,10 @@ scp -i "${SSH_KEY}" \
     "${PROJECT_ROOT}/docker-compose.yml" \
     "${OCI_USER}@${OCI_IP}:${REMOTE_DIR}/" > /tmp/scp-out.txt 2>&1
 
+[ -f "${PROJECT_ROOT}/.env.secrets" ] && scp -i "${SSH_KEY}" \
+    "${PROJECT_ROOT}/.env.secrets" \
+    "${OCI_USER}@${OCI_IP}:${REMOTE_DIR}/" >> /tmp/scp-out.txt 2>&1
+
 # container/ directory (Dockerfile, entrypoint, recipes)
 scp -i "${SSH_KEY}" \
     "${PROJECT_ROOT}/container/Dockerfile" \
@@ -54,6 +58,7 @@ scp -i "${SSH_KEY}" -r \
 # scripts/ directory
 scp -i "${SSH_KEY}" \
     "${PROJECT_ROOT}/scripts/start.sh" \
+    "${PROJECT_ROOT}/scripts/tunnel.sh" \
     "${OCI_USER}@${OCI_IP}:${REMOTE_DIR}/scripts/" >> /tmp/scp-out.txt 2>&1
 
 cat /tmp/scp-out.txt
