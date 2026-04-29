@@ -16,6 +16,9 @@ volumes/
 .vscode/
 .idea/
 
+# Workspace files
+*.code-workspace
+
 # Node modules
 node_modules/
 
